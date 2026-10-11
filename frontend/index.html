@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Course Registration DApp</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 760px; margin: 30px auto; padding: 0 16px; color: #1f2937; }
+  h1 { font-size: 22px; }
+  .card { border: 1px solid #d1d5db; border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+  input, button { padding: 8px; margin: 4px 4px 4px 0; font-size: 14px; }
+  button { cursor: pointer; background: #2563eb; color: #fff; border: 0; border-radius: 6px; }
+  button.red { background: #dc2626; }
+  button.grey { background: #6b7280; }
+  #status { font-size: 13px; color: #374151; white-space: pre-wrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td, th { border-bottom: 1px solid #e5e7eb; padding: 6px; text-align: left; }
+</style>
+</head>
+<body>
+<h1>Course Registration DApp</h1>
+
+<div class="card">
+  <input id="addr" size="46" placeholder="Deployed contract address (0x...)" />
+  <button onclick="connect()">Connect Wallet</button>
+  <div id="account">Not connected</div>
+</div>
+
+<div class="card">
+  <b>Courses</b> <button class="grey" onclick="loadCourses()">Refresh</button>
+  <table id="courses"><tr><th>ID</th><th>Name</th><th>Enrolled / Capacity</th><th>Status</th><th>Action</th></tr></table>
+</div>
+
+<div class="card">
+  <b>My courses:</b> <span id="mine">-</span>
+</div>
+
+<div class="card" id="adminBox">
+  <b>Admin: add course</b><br />
+  <input id="cname" placeholder="Course name" />
+  <input id="ccap" type="number" min="1" placeholder="Capacity" />
+  <button onclick="addCourse()">Add Course</button>
+</div>
+
+<div id="status"></div>
+
+<script>
+const ABI = [
+  "function admin() view returns (address)",
+  "function courseCount() view returns (uint256)",
+  "function registrationOpen() view returns (bool)",
+  "function getCourse(uint256) view returns (tuple(uint256 id,string name,uint256 capacity,uint256 enrolled,bool active))",
+  "function getStudentCourses(address) view returns (uint256[])",
+  "function isRegistered(uint256,address) view returns (bool)",
+  "function addCourse(string,uint256) returns (uint256)",
+  "function register(uint256)",
+  "function withdraw(uint256)"
+];
+let provider, signer, contract, me;
+const $ = (id) => document.getElementById(id);
+const say = (m) => ($("status").textContent = m);
+
+async function connect() {
+  try {
+    if (!window.ethereum) return say("MetaMask not found. Install it first.");
+    provider = new ethers.BrowserProvider(window.ethereum);
+    signer = await provider.getSigner();
+    me = await signer.getAddress();
+    contract = new ethers.Contract($("addr").value.trim(), ABI, signer);
+    $("account").textContent = "Connected: " + me;
+    const admin = await contract.admin();
+    $("adminBox").style.display = admin.toLowerCase() === me.toLowerCase() ? "block" : "none";
+    await loadCourses();
+  } catch (e) { say("Error: " + (e.shortMessage || e.message)); }
+}
+
+async function loadCourses() {
+  if (!contract) return say("Connect wallet first.");
+  const n = Number(await contract.courseCount());
+  const t = $("courses");
+  t.innerHTML = "<tr><th>ID</th><th>Name</th><th>Enrolled / Capacity</th><th>Status</th><th>Action</th></tr>";
+  for (let i = 1; i <= n; i++) {
+    const c = await contract.getCourse(i);
+    const reg = await contract.isRegistered(i, me);
+    const btn = reg
+      ? `<button class="red" onclick="withdraw(${i})">Withdraw</button>`
+      : `<button onclick="register(${i})">Register</button>`;
+    t.innerHTML += `<tr><td>${c.id}</td><td>${c.name}</td><td>${c.enrolled} / ${c.capacity}</td><td>${c.active ? "Active" : "Inactive"}</td><td>${btn}</td></tr>`;
+  }
+  const mine = await contract.getStudentCourses(me);
+  $("mine").textContent = mine.length ? mine.join(", ") : "none";
+}
+
+async function run(label, fn) {
+  try {
+    say(label + " ... confirm in MetaMask");
+    const tx = await fn();
+    say("Tx sent: " + tx.hash + "\nWaiting for confirmation...");
+    await tx.wait();
+    say("Confirmed: " + tx.hash);
+    await loadCourses();
+  } catch (e) { say("Failed: " + (e.reason || e.shortMessage || e.message)); }
+}
+const register = (id) => run("Registering", () => contract.register(id));
+const withdraw = (id) => run("Withdrawing", () => contract.withdraw(id));
+const addCourse = () => run("Adding course", () => contract.addCourse($("cname").value, $("ccap").value));
+</script>
+</body>
+</html>
